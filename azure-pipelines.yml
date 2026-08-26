@@ -1,0 +1,134 @@
+# Azure DevOps Pipeline — CI for the task-manager app.
+#
+# What this does (mirrors the AWS version's GitHub Actions role):
+#   1. Builds the 3 service images (frontend, auth-service, task-service)
+#   2. Pushes them to Azure Container Registry (ACR)
+#   3. Bumps helm/task-manager/values.yaml's image.tag and commits/pushes it
+#
+# What this does NOT do: it never runs `kubectl` or `helm upgrade` against
+# AKS. Argo CD (already running in-cluster) watches this repo and syncs the
+# Helm chart whenever it sees a new commit on `main` — same GitOps split as
+# the original AWS reference project, just with Azure Repos + Azure
+# Pipelines standing in for GitHub + GitHub Actions.
+#
+# Required pipeline setup (one-time, in Azure DevOps):
+#   - Create a Service Connection of type "Docker Registry" -> "Azure
+#     Container Registry" pointing at your ACR (used by the Docker@2 tasks
+#     below via $(dockerRegistryServiceConnection)).
+#   - Create a variable group (or pipeline variables) with:
+#       acrName            e.g. taskmanageracr
+#       dockerRegistryServiceConnection   the Service Connection name above
+#   - Give the pipeline's build identity "Contribute" permission on this
+#     repo (Project Settings > Repositories) so it can push the tag-bump
+#     commit back to `main`.
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - frontend/*
+      - backend/*
+      - helm/*
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - group: task-manager-acr   # acrName, dockerRegistryServiceConnection
+  - name: imageTag
+    value: "$(Build.SourceVersion)"
+  - name: registry
+    value: "$(acrName).azurecr.io"
+
+stages:
+  - stage: BuildAndPush
+    displayName: Build & push images to ACR
+    jobs:
+      - job: Images
+        displayName: Build and push all three services
+        steps:
+          - task: Docker@2
+            displayName: Build & push frontend
+            inputs:
+              containerRegistry: "$(dockerRegistryServiceConnection)"
+              repository: task-manager/frontend
+              command: buildAndPush
+              Dockerfile: frontend/Dockerfile
+              buildContext: frontend
+              tags: |
+                $(imageTag)
+                latest
+
+          - task: Docker@2
+            displayName: Build & push auth-service
+            inputs:
+              containerRegistry: "$(dockerRegistryServiceConnection)"
+              repository: task-manager/auth-service
+              command: buildAndPush
+              Dockerfile: backend/auth-service/Dockerfile
+              buildContext: backend/auth-service
+              tags: |
+                $(imageTag)
+                latest
+
+          - task: Docker@2
+            displayName: Build & push task-service
+            inputs:
+              containerRegistry: "$(dockerRegistryServiceConnection)"
+              repository: task-manager/task-service
+              command: buildAndPush
+              Dockerfile: backend/task-service/Dockerfile
+              buildContext: backend/task-service
+              tags: |
+                $(imageTag)
+                latest
+
+  - stage: BumpGitOpsTag
+    displayName: Bump image tag for Argo CD
+    dependsOn: BuildAndPush
+    jobs:
+      - job: UpdateValues
+        displayName: Commit new image.tag to helm values
+        steps:
+          - checkout: self
+            persistCredentials: true
+
+          - bash: |
+              set -euo pipefail
+              git config user.email "azure-pipelines@dev.azure.com"
+              git config user.name "Azure Pipelines"
+
+              # Requires yq (https://github.com/mikefarah/yq); install if the
+              # agent image doesn't already have it.
+              if ! command -v yq >/dev/null 2>&1; then
+                sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+                sudo chmod +x /usr/local/bin/yq
+              fi
+
+              yq -i '.image.tag = "$(imageTag)"' helm/task-manager/values.yaml
+              yq -i '.image.registry = "$(registry)"' helm/task-manager/values.yaml
+
+              if git diff --quiet; then
+                echo "No changes to commit."
+              else
+                git add helm/task-manager/values.yaml
+                git commit -m "deploy: bump image tag to $(imageTag) [skip ci]"
+                git push origin HEAD:main
+              fi
+            displayName: Update values.yaml image tag and push
+
+# Notes:
+# - "[skip ci]" in the commit message avoids re-triggering this same
+#   pipeline in a loop; adjust the trigger/paths above if your org's
+#   convention differs.
+# - Argo CD's default poll interval is ~3 minutes; to sync immediately you
+#   can add an `argocd app sync` step here instead, using the argocd CLI and
+#   an Argo CD auth token stored as a secret pipeline variable. That would
+#   move this from "pure GitOps" to "GitOps with a push-trigger," which is a
+#   fine and common trade-off — just note it changes who can trigger a sync.
+# - If you'd rather use a separate GitOps repo (recommended for larger
+#   teams), replace the checkout/commit steps above with a checkout of that
+#   repo (via an additional Service Connection / PAT) and commit the tag
+#   bump there instead of to this app repo.

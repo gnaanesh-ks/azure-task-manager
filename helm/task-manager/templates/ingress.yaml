@@ -1,0 +1,37 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "task-manager.fullname" . }}-ingress
+  annotations:
+    {{- toYaml .Values.ingress.annotations | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts: [{{ .Values.ingress.host }}]
+      secretName: {{ include "task-manager.fullname" . }}-tls
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /api/auth
+            pathType: Prefix
+            backend:
+              service:
+                name: auth-service
+                port: { number: {{ .Values.authService.port }} }
+          - path: /api/tasks
+            pathType: Prefix
+            backend:
+              service:
+                name: task-service
+                port: { number: {{ .Values.taskService.port }} }
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port: { number: 80 }
+{{- end }}

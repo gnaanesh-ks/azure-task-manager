@@ -1,0 +1,55 @@
+# Argo CD Application — GitOps entrypoint for the task-manager Helm chart.
+# Argo CD itself is cloud-agnostic and runs on AKS exactly as it would on
+# any other Kubernetes cluster; only the image registry (ACR) and the Git
+# host (Azure Repos here) are Azure-specific.
+#
+# Recommended pattern: keep this repo's `helm/task-manager` as the chart
+# source of truth, but store *environment values* (image tags, replica
+# counts, host names) in a separate "GitOps" repo/branch that Azure
+# Pipelines updates on every build. Argo CD then only ever needs to watch
+# that repo.
+#
+# For an App-of-Apps setup, wrap this file (and a similar one for
+# kube-prometheus-stack) inside a single root Application whose source
+# points at a directory containing both — Argo CD will recursively manage
+# both child Applications.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: task-manager
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://dev.azure.com/your-org/task-manager/_git/task-manager-app
+    targetRevision: main
+    path: helm/task-manager
+    helm:
+      valueFiles:
+        - values.yaml
+        # - values-prod.yaml   # layer an environment-specific overlay
+      parameters:
+        - name: image.tag
+          value: "REPLACE_WITH_CI_IMAGE_TAG"   # bumped automatically by Azure Pipelines or Argo CD Image Updater
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app
+
+  syncPolicy:
+    automated:
+      prune: true       # remove resources deleted from Git
+      selfHeal: true     # revert manual kubectl changes back to Git state
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

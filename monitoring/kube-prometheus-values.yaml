@@ -1,0 +1,49 @@
+# Values for: helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack
+#             -n monitoring --create-namespace -f monitoring/kube-prometheus-values.yaml
+
+prometheus:
+  prometheusSpec:
+    serviceMonitorSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    serviceMonitorNamespaceSelector: {}   # allow discovering ServiceMonitors in any namespace (e.g. "app")
+    ruleSelectorNilUsesHelmValues: false
+    retention: 15d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: managed-csi
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests: { storage: 20Gi }
+
+alertmanager:
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: managed-csi
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests: { storage: 5Gi }
+  # Config itself is supplied via monitoring/alertmanager-config.yaml
+  # (either as an AlertmanagerConfig CR or the raw secret — see that file's comments)
+
+grafana:
+  adminPassword: "change-me"   # prefer Azure Key Vault via External Secrets / SSO in production
+  persistence:
+    enabled: true
+    storageClassName: managed-csi
+    size: 5Gi
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - grafana.example.com
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard   # ConfigMaps with this label are auto-loaded as dashboards
+      labelValue: "1"

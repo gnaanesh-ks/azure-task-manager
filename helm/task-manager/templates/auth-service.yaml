@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "task-manager.fullname" . }}-auth-service
+  labels:
+    app: auth-service
+spec:
+  replicas: {{ .Values.authService.replicas }}
+  selector:
+    matchLabels: { app: auth-service }
+  template:
+    metadata:
+      labels: { app: auth-service }
+    spec:
+      containers:
+        - name: auth-service
+          image: {{ include "task-manager.image" (dict "root" $ "repository" .Values.authService.repository) }}
+          ports:
+            - containerPort: {{ .Values.authService.port }}
+          env:
+            - name: PORT
+              value: {{ .Values.authService.port | quote }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "task-manager.fullname" . }}-app-secrets
+                  key: JWT_SECRET
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "task-manager.fullname" . }}-app-secrets
+                  key: DATABASE_URL
+          readinessProbe:
+            httpGet: { path: /readyz, port: {{ .Values.authService.port }} }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: {{ .Values.authService.port }} }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.authService.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  labels:
+    app: auth-service
+spec:
+  selector: { app: auth-service }
+  ports:
+    - name: http
+      port: {{ .Values.authService.port }}
+      targetPort: {{ .Values.authService.port }}
+---
+{{- if .Values.authService.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "task-manager.fullname" . }}-auth-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "task-manager.fullname" . }}-auth-service
+  minReplicas: {{ .Values.authService.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.authService.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.authService.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

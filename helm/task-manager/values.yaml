@@ -1,0 +1,73 @@
+image:
+  registry: "taskmanageracr.azurecr.io"
+  tag: "latest"
+
+frontend:
+  repository: task-manager/frontend
+  replicas: 2
+  port: 8080
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 256Mi }
+
+authService:
+  repository: task-manager/auth-service
+  replicas: 2
+  port: 4000
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+taskService:
+  repository: task-manager/task-service
+  replicas: 2
+  port: 4001
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+# Toggle this off and set externalDatabaseUrl to point at Azure Database
+# for PostgreSQL Flexible Server in production.
+postgresql:
+  enabled: true
+  storage: 5Gi
+  storageClassName: managed-csi
+  database: taskmanager
+  username: taskmanager
+
+# Used by both services when postgresql.enabled=false
+externalDatabaseUrl: ""
+
+secrets:
+  jwtSecret: "change-me-in-a-real-secret-manager"   # prefer Azure Key Vault (see notes below)
+  postgresPassword: "change-me-too"
+
+ingress:
+  enabled: true
+  className: nginx
+  host: task-manager.example.com
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Alternative for Azure Application Gateway Ingress Controller (AGIC)
+    # instead of ingress-nginx: set className to "azure-application-gateway"
+    # and swap these two annotations for:
+    #   appgw.ingress.kubernetes.io/ssl-redirect: "true"
+    #   appgw.ingress.kubernetes.io/use-private-ip: "false"
+  tls: true   # set false if you're not using cert-manager / don't need HTTPS yet
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    interval: 15s

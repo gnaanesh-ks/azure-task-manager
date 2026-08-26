@@ -1,0 +1,35 @@
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "task-manager.fullname" . }}-auth-service
+  namespace: {{ .Values.monitoring.serviceMonitor.namespace }}
+  labels:
+    release: kube-prometheus-stack   # must match the Prometheus Operator's serviceMonitorSelector
+spec:
+  selector:
+    matchLabels: { app: auth-service }
+  namespaceSelector:
+    matchNames: ["{{ .Release.Namespace }}"]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "task-manager.fullname" . }}-task-service
+  namespace: {{ .Values.monitoring.serviceMonitor.namespace }}
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels: { app: task-service }
+  namespaceSelector:
+    matchNames: ["{{ .Release.Namespace }}"]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+{{- end }}

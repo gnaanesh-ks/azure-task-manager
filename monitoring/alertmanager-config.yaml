@@ -1,0 +1,64 @@
+# Alertmanager config for the task-manager alert rules.
+#
+# Two ways to apply this depending on how kube-prometheus-stack was installed:
+#   (a) As an AlertmanagerConfig CR (shown below) if the Alertmanager Operator
+#       CRD support is enabled and alertmanagerConfigSelector is set.
+#   (b) As the raw `alertmanager.yaml` inside the `alertmanager-<release>`
+#       Secret (Helm value: alertmanager.config) — same routing tree content.
+#
+# Replace the webhook/service key placeholders with real values pulled from
+# Azure Key Vault via the Secrets Store CSI Driver or External Secrets
+# Operator; do not commit real secrets to Git.
+
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: task-manager-routes
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  route:
+    groupBy: ["alertname", "route"]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    receiver: slack-warnings
+    routes:
+      - matchers:
+          - name: severity
+            value: critical
+        receiver: pagerduty-critical
+        continue: true
+      - matchers:
+          - name: severity
+            value: critical
+        receiver: slack-critical
+      - matchers:
+          - name: severity
+            value: warning
+        receiver: slack-warnings
+
+  receivers:
+    - name: slack-warnings
+      slackConfigs:
+        - apiURL:
+            name: alertmanager-slack-webhook
+            key: warnings-url
+          channel: "#task-manager-alerts"
+          sendResolved: true
+
+    - name: slack-critical
+      slackConfigs:
+        - apiURL:
+            name: alertmanager-slack-webhook
+            key: critical-url
+          channel: "#task-manager-incidents"
+          sendResolved: true
+
+    - name: pagerduty-critical
+      pagerdutyConfigs:
+        - serviceKey:
+            name: alertmanager-pagerduty
+            key: service-key
+          severity: critical
