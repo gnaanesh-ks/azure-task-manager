@@ -36,21 +36,55 @@ taskService:
     maxReplicas: 6
     targetCPUUtilizationPercentage: 70
 
-# Toggle this off and set externalDatabaseUrl to point at Azure Database
-# for PostgreSQL Flexible Server in production.
+# Database — Option A (Azure Database for PostgreSQL Flexible Server) is the
+# selected path for this deployment (see DEPLOYMENT.md step 5), so the
+# in-cluster StatefulSet is disabled. The keys under postgresql: are only
+# read when enabled=true (the Option B demo fallback).
 postgresql:
-  enabled: true
-  storage: 5Gi
-  storageClassName: managed-csi
+  enabled: false
+  storage: 10Gi
+  storageClassName: task-manager-postgres
   database: taskmanager
   username: taskmanager
 
-# Used by both services when postgresql.enabled=false
+# Option A: connection to Azure Database for PostgreSQL Flexible Server.
+# The password is NOT stored here — it comes from secrets.postgresPassword,
+# which in production is injected from Azure Key Vault (see step 6). The
+# DATABASE_URL is assembled from these parts in _helpers.tpl.
+externalDatabase:
+  host: "REPLACE_WITH_DB_HOST"   # e.g. task-manager-db.postgres.database.azure.com
+  port: 5432
+  database: taskmanager
+  username: taskmanager
+  sslmode: require               # production: verify-full + sslrootcert
+
+# Optional full override. If non-empty it wins over externalDatabase above.
 externalDatabaseUrl: ""
 
+serviceAccount:
+  name: task-manager
+  # Client ID of the user-assigned managed identity federated to this
+  # ServiceAccount. Required when secrets.provider=keyvault; ignored otherwise.
+  workloadIdentityClientId: ""
+
 secrets:
-  jwtSecret: "change-me-in-a-real-secret-manager"   # prefer Azure Key Vault (see notes below)
-  postgresPassword: "change-me-too"
+  # inline   -> plain Kubernetes Secret rendered from the values below
+  #             (self-contained; fine for a first end-to-end run)
+  # keyvault -> Azure Key Vault via the Secrets Store CSI Driver + workload
+  #             identity; JWT_SECRET and DATABASE_URL are synced from the vault
+  #             and nothing sensitive is rendered into manifests / Git
+  provider: inline
+
+  # --- provider: inline ---
+  jwtSecret: "change-me-in-a-real-secret-manager"
+  postgresPassword: "change-me-too"                  # only consumed by the Option B in-cluster Postgres
+
+  # --- provider: keyvault ---
+  keyvault:
+    name: ""                                         # Key Vault resource name
+    tenantId: ""                                     # AAD tenant (az account show --query tenantId -o tsv)
+    jwtSecretName: jwt-secret                        # vault object -> Secret key JWT_SECRET
+    databaseUrlSecretName: database-url              # vault object -> Secret key DATABASE_URL (full conn string)
 
 ingress:
   enabled: true

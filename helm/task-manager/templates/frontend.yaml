@@ -12,6 +12,7 @@ spec:
     metadata:
       labels: { app: frontend }
     spec:
+      serviceAccountName: {{ include "task-manager.serviceAccountName" . }}
       containers:
         - name: frontend
           image: {{ include "task-manager.image" (dict "root" $ "repository" .Values.frontend.repository) }}

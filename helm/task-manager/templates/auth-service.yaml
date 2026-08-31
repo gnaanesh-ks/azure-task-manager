@@ -10,13 +10,33 @@ spec:
     matchLabels: { app: auth-service }
   template:
     metadata:
-      labels: { app: auth-service }
+      labels:
+        app: auth-service
+        {{- if eq .Values.secrets.provider "keyvault" }}
+        azure.workload.identity/use: "true"
+        {{- end }}
     spec:
+      serviceAccountName: {{ include "task-manager.serviceAccountName" . }}
+      {{- if eq .Values.secrets.provider "keyvault" }}
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: {{ include "task-manager.fullname" . }}-kv
+      {{- end }}
       containers:
         - name: auth-service
           image: {{ include "task-manager.image" (dict "root" $ "repository" .Values.authService.repository) }}
           ports:
             - containerPort: {{ .Values.authService.port }}
+          {{- if eq .Values.secrets.provider "keyvault" }}
+          volumeMounts:
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+          {{- end }}
           env:
             - name: PORT
               value: {{ .Values.authService.port | quote }}
